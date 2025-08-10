@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Absensi Driver NFC</title>
+</head>
+<body>
+  <h1>Absensi Driver Anjem UMS</h1>
+  <button id="scanBtn">Scan Kartu NFC</button>
+  <p id="status"></p>
+
+  <script>
+    const drivers = {
+      "DriverUID123": { name: "Fadli", status: "OFF" },
+      "DriverUID456": { name: "Rizki", status: "ON" }
+    };
+
+    document.getElementById('scanBtn').addEventListener('click', async () => {
+      if ('NDEFReader' in window) {
+        try {
+          const ndef = new NDEFReader();
+          await ndef.scan();
+          document.getElementById('status').textContent = "Silakan tempel kartu...";
+
+          ndef.onreading = event => {
+            const uid = event.serialNumber;
+            if (drivers[uid]) {
+              drivers[uid].status = drivers[uid].status === "OFF" ? "ON" : "OFF";
+              document.getElementById('status').textContent =
+                `${drivers[uid].name} sekarang ${drivers[uid].status}`;
+            } else {
+              document.getElementById('status').textContent = "Driver tidak terdaftar!";
+            }
+          };
+        } catch (err) {
+          document.getElementById('status').textContent = "Gagal scan: " + err;
+        }
+      } else {
+        document.getElementById('status').textContent = "Browser tidak mendukung NFC.";
+      }
+    });
+  </script>
+</body>
+</html>
