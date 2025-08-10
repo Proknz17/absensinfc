@@ -1,43 +1,313 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="id">
 <head>
-  <title>Absensi Driver NFC</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Absensi NFC - Anjem UMS (Prototype)</title>
+  <style>
+    :root{--bg:#0f172a;--card:#0b1220;--accent:#60a5fa;--muted:#94a3b8}
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,'Helvetica Neue',Arial;background:linear-gradient(180deg,#071024 0%,#0b1220 100%);color:#e6eef8}
+    .container{max-width:900px;margin:28px auto;padding:18px}
+    header{display:flex;align-items:center;gap:12px}
+    h1{margin:0;font-size:20px}
+    .card{background:rgba(255,255,255,0.03);padding:14px;border-radius:12px;box-shadow:0 6px 18px rgba(2,6,23,0.6);margin-top:12px}
+    label{font-size:13px;color:var(--muted)}
+    input,select,button,textarea{width:100%;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:inherit;margin-top:6px}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .btn{background:linear-gradient(90deg,var(--accent),#3b82f6);border:none;color:#04243e;font-weight:600;cursor:pointer}
+    .btn-ghost{background:transparent;border:1px solid rgba(255,255,255,0.06)}
+    .small{font-size:13px}
+    table{width:100%;border-collapse:collapse;margin-top:10px}
+    th,td{padding:8px;border-bottom:1px dashed rgba(255,255,255,0.03);text-align:left}
+    .status-on{color:#10b981;font-weight:700}
+    .status-off{color:#ef4444;font-weight:700}
+    nav{display:flex;gap:8px;margin-top:12px}
+    nav button{padding:8px 12px;border-radius:10px}
+    .hint{font-size:13px;color:var(--muted);margin-top:6px}
+    @media(max-width:700px){.row{grid-template-columns:1fr}}
+  </style>
 </head>
 <body>
-  <h1>Absensi Driver Anjem UMS</h1>
-  <button id="scanBtn">Scan Kartu NFC</button>
-  <p id="status"></p>
+  <div class="container">
+    <header>
+      <div style="width:48px;height:48px;border-radius:10px;background:linear-gradient(180deg,#08315a,#06223a);display:flex;align-items:center;justify-content:center;font-weight:700">AN</div>
+      <div>
+        <h1>Absensi NFC - Anjem UMS (Prototype)</h1>
+        <div class="hint">Buka di Chrome Android (HTTPS / localhost). Aktifkan NFC di HP.</div>
+      </div>
+    </header>
+
+    <nav>
+      <button id="viewReg" class="btn-ghost">Registrasi Driver</button>
+      <button id="viewScan" class="btn">Scan Absensi</button>
+      <button id="viewReport" class="btn-ghost">Laporan & Export</button>
+    </nav>
+
+    <section id="reg" class="card" style="display:none">
+      <h3>Registrasi Driver</h3>
+      <div class="row">
+        <div>
+          <label>Nama</label>
+          <input id="regName" placeholder="Nama driver" />
+        </div>
+        <div>
+          <label>ID / NIM</label>
+          <input id="regId" placeholder="ID driver" />
+        </div>
+      </div>
+      <div style="margin-top:10px">
+        <label>UID Kartu NFC</label>
+        <div style="display:flex;gap:8px">
+          <input id="regUid" placeholder="(isi manual atau pakai scan)" />
+          <button id="scanUidBtn" class="btn-ghost" style="width:140px">Scan UID</button>
+        </div>
+        <div class="hint">Saat menekan Scan UID, tempelkan kartu ke belakang HP. Jika browser tidak mendukung Web NFC, isi UID manual.</div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button id="saveReg" class="btn">Simpan Driver</button>
+        <button id="clearAll" class="btn-ghost">Hapus Semua Data (dev)</button>
+      </div>
+
+      <div id="regList" style="margin-top:12px"></div>
+    </section>
+
+    <section id="scan" class="card">
+      <h3>Scan Absensi</h3>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button id="startScan" class="btn">Mulai Scan NFC</button>
+        <div id="scanStatus" class="hint">Belum aktif</div>
+      </div>
+
+      <div style="margin-top:12px">
+        <h4>Riwayat Terbaru</h4>
+        <div id="recent"></div>
+      </div>
+    </section>
+
+    <section id="report" class="card" style="display:none">
+      <h3>Laporan & Export</h3>
+      <label>Pilih tanggal</label>
+      <div style="display:flex;gap:8px">
+        <input type="date" id="dateFrom" />
+        <input type="date" id="dateTo" />
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button id="filterBtn" class="btn-ghost">Filter</button>
+        <button id="exportBtn" class="btn">Export CSV</button>
+      </div>
+      <div id="reportTable" style="margin-top:12px"></div>
+    </section>
+
+    <footer style="margin-top:18px;text-align:center;color:var(--muted)">Prototype — offline mode (IndexedDB). Kalau mau sync server nanti bisa ditambah.</footer>
+  </div>
 
   <script>
-    const drivers = {
-      "DriverUID123": { name: "Fadli", status: "OFF" },
-      "DriverUID456": { name: "Rizki", status: "ON" }
-    };
+  // Simple IndexedDB helper
+  const DB_NAME = 'anjem_absensi_v1';
+  const DB_VER = 1;
+  let db;
 
-    document.getElementById('scanBtn').addEventListener('click', async () => {
-      if ('NDEFReader' in window) {
-        try {
-          const ndef = new NDEFReader();
-          await ndef.scan();
-          document.getElementById('status').textContent = "Silakan tempel kartu...";
-
-          ndef.onreading = event => {
-            const uid = event.serialNumber;
-            if (drivers[uid]) {
-              drivers[uid].status = drivers[uid].status === "OFF" ? "ON" : "OFF";
-              document.getElementById('status').textContent =
-                `${drivers[uid].name} sekarang ${drivers[uid].status}`;
-            } else {
-              document.getElementById('status').textContent = "Driver tidak terdaftar!";
-            }
-          };
-        } catch (err) {
-          document.getElementById('status').textContent = "Gagal scan: " + err;
+  function openDB(){
+    return new Promise((res,rej)=>{
+      const req = indexedDB.open(DB_NAME, DB_VER);
+      req.onupgradeneeded = e => {
+        const d = e.target.result;
+        if(!d.objectStoreNames.contains('drivers')){
+          const s = d.createObjectStore('drivers',{keyPath:'uid'});
         }
-      } else {
-        document.getElementById('status').textContent = "Browser tidak mendukung NFC.";
+        if(!d.objectStoreNames.contains('logs')){
+          const s = d.createObjectStore('logs',{keyPath:'id'});
+        }
       }
+      req.onsuccess = e => { db = e.target.result; res(db); }
+      req.onerror = e => rej(e);
     });
+  }
+
+  async function putDriver(driver){
+    const tx = db.transaction('drivers','readwrite');
+    tx.objectStore('drivers').put(driver);
+    return tx.complete;
+  }
+
+  function getAllDrivers(){
+    return new Promise((res,rej)=>{
+      const tx = db.transaction('drivers').objectStore('drivers');
+      const all = tx.getAll();
+      all.onsuccess = ()=> res(all.result);
+      all.onerror = e=> rej(e);
+    });
+  }
+
+  function clearAllData(){
+    return new Promise((res,rej)=>{
+      const t1 = db.transaction('drivers','readwrite').objectStore('drivers').clear();
+      const t2 = db.transaction('logs','readwrite').objectStore('logs').clear();
+      let done=0; function check(){done++; if(done===2)res();}
+      t1.onsuccess=check; t1.onerror=check; t2.onsuccess=check; t2.onerror=check;
+    });
+  }
+
+  function addLog(log){
+    const tx = db.transaction('logs','readwrite');
+    tx.objectStore('logs').put(log);
+    return tx.complete;
+  }
+
+  function getLogs(range){
+    return new Promise((res,rej)=>{
+      const req = db.transaction('logs').objectStore('logs').getAll();
+      req.onsuccess = ()=> res(req.result.sort((a,b)=>b.timestamp-a.timestamp));
+      req.onerror = e=> rej(e);
+    });
+  }
+
+  // UI actions
+  document.getElementById('viewReg').addEventListener('click',()=>{show('reg')});
+  document.getElementById('viewScan').addEventListener('click',()=>{show('scan')});
+  document.getElementById('viewReport').addEventListener('click',()=>{show('report')});
+
+  function show(id){ ['reg','scan','report'].forEach(x=>document.getElementById(x).style.display = (x===id)?'block':'none'); }
+
+  // registration
+  document.getElementById('saveReg').addEventListener('click',async ()=>{
+    const name = document.getElementById('regName').value.trim();
+    const id = document.getElementById('regId').value.trim();
+    const uid = document.getElementById('regUid').value.trim();
+    if(!name || !uid){ alert('Nama dan UID harus diisi'); return; }
+    const drv = { uid, name, id: id||'', status: 'OFF', created: Date.now() };
+    const tx = db.transaction('drivers','readwrite');
+    tx.objectStore('drivers').put(drv);
+    tx.oncomplete = ()=>{ renderDriverList(); alert('Driver tersimpan'); }
+  });
+
+  document.getElementById('clearAll').addEventListener('click',async ()=>{
+    if(!confirm('Yakin hapus semua data?'))return;
+    await clearAllData(); renderDriverList(); renderRecent(); alert('Semua data dihapus');
+  });
+
+  async function renderDriverList(){
+    const list = await getAllDrivers();
+    const wrap = document.getElementById('regList');
+    if(list.length===0){ wrap.innerHTML='<div class="hint">Belum ada driver terdaftar</div>'; return; }
+    let html = '<table><tr><th>UID</th><th>Nama</th><th>ID</th><th>Status</th></tr>';
+    list.forEach(d=>{ html+=`<tr><td>${d.uid}</td><td>${d.name}</td><td>${d.id||'-'}</td><td class="${d.status==='ON'?'status-on':'status-off'}">${d.status}</td></tr>`});
+    html += '</table>';
+    wrap.innerHTML = html;
+  }
+
+  // scan UID for registration
+  document.getElementById('scanUidBtn').addEventListener('click', async ()=>{
+    if('NDEFReader' in window){
+      try{
+        const ndef = new NDEFReader();
+        await ndef.scan();
+        document.getElementById('scanUidBtn').textContent = 'Menunggu... tempel kartu';
+        ndef.onreading = ev => {
+          const uid = ev.serialNumber || parseNdefId(ev);
+          document.getElementById('regUid').value = uid;
+          document.getElementById('scanUidBtn').textContent = 'Scan UID';
+        }
+      }catch(err){ alert('Gagal scan UID: '+err); document.getElementById('scanUidBtn').textContent='Scan UID'; }
+    } else {
+      alert('Web NFC tidak tersedia di browser ini. Isi UID secara manual.');
+    }
+  });
+
+  function parseNdefId(ev){
+    // fallback: try to read first record text
+    try{
+      const rec = ev.message.records[0];
+      if(rec && rec.recordType==='text'){
+        const dec = new TextDecoder(rec.encoding||'utf-8');
+        return dec.decode(rec.data);
+      }
+    }catch(e){}
+    return 'unknown-'+Date.now();
+  }
+
+  // scanning attendance
+  let activeReader = null;
+  document.getElementById('startScan').addEventListener('click', async ()=>{
+    if(!('NDEFReader' in window)){ alert('Browser tidak mendukung Web NFC. Gunakan Chrome Android.'); return; }
+    try{
+      const ndef = new NDEFReader();
+      await ndef.scan();
+      activeReader = ndef;
+      document.getElementById('scanStatus').textContent = 'Scanning... Tempel kartu ke HP';
+      ndef.onreading = async event => {
+        const uid = event.serialNumber || parseNdefId(event);
+        await handleScan(uid);
+      }
+      ndef.onreadingerror = ()=>{ document.getElementById('scanStatus').textContent='Gagal membaca tag'; }
+    }catch(err){ alert('Gagal memulai scan: '+err); }
+  });
+
+  async function handleScan(uid){
+    // cari driver
+    const tx = db.transaction('drivers','readwrite');
+    const store = tx.objectStore('drivers');
+    const req = store.get(uid);
+    req.onsuccess = async ()=>{
+      const d = req.result;
+      const time = Date.now();
+      const log = { id: uid+'-'+time, uid, name: d?d.name:'(unknown)', action: d? (d.status==='ON'?'OFF':'ON') : 'UNKNOWN', timestamp: time };
+      if(d){ d.status = d.status==='ON'?'OFF':'ON'; store.put(d); }
+      await addLog(log);
+      renderDriverList(); renderRecent();
+      document.getElementById('scanStatus').textContent = `UID: ${uid} — ${log.name} — ${log.action} @ ${new Date(time).toLocaleString()}`;
+    }
+    req.onerror = ()=>{ alert('Gagal cari driver'); }
+  }
+
+  async function renderRecent(){
+    const logs = await getLogs();
+    const recent = logs.slice(0,8);
+    if(recent.length===0){ document.getElementById('recent').innerHTML='<div class="hint">Belum ada aktivitas</div>'; return; }
+    let html = '<table><tr><th>Waktu</th><th>Nama</th><th>UID</th><th>Aksi</th></tr>';
+    recent.forEach(r=>{ html+=`<tr><td>${new Date(r.timestamp).toLocaleString()}</td><td>${r.name}</td><td>${r.uid}</td><td class="${r.action==='ON'?'status-on':'status-off'}">${r.action}</td></tr>` });
+    html += '</table>';
+    document.getElementById('recent').innerHTML = html;
+  }
+
+  // report & export
+  document.getElementById('filterBtn').addEventListener('click', async ()=>{
+    const f = document.getElementById('dateFrom').value;
+    const t = document.getElementById('dateTo').value;
+    const logs = await getLogs();
+    const from = f? new Date(f).setHours(0,0,0,0): -Infinity;
+    const to = t? new Date(t).setHours(23,59,59,999): Infinity;
+    const filtered = logs.filter(l=> l.timestamp>=from && l.timestamp<=to );
+    renderReportTable(filtered);
+  });
+
+  function renderReportTable(list){
+    if(list.length===0){ document.getElementById('reportTable').innerHTML='<div class="hint">Tidak ada data</div>'; return; }
+    let html = '<table><tr><th>Waktu</th><th>Nama</th><th>UID</th><th>Aksi</th></tr>';
+    list.forEach(r=> html+=`<tr><td>${new Date(r.timestamp).toLocaleString()}</td><td>${r.name}</td><td>${r.uid}</td><td>${r.action}</td></tr>`);
+    html += '</table>';
+    document.getElementById('reportTable').innerHTML = html;
+  }
+
+  document.getElementById('exportBtn').addEventListener('click', async ()=>{
+    const logs = await getLogs();
+    if(logs.length===0){ alert('Tidak ada data untuk diexport'); return; }
+    const rows = logs.map(r=> [new Date(r.timestamp).toLocaleString(), r.name, r.uid, r.action]);
+    let csv = 'Waktu,Nama,UID,Aksi\n' + rows.map(r=> r.map(c=> '"'+(String(c).replace(/"/g,'""'))+'"').join(',')).join('\n');
+    const blob = new Blob([csv],{type:'text/csv'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'absensi_anjem_'+(new Date().toISOString().slice(0,10))+'.csv';
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  });
+
+  // init
+  (async ()=>{
+    await openDB();
+    show('scan');
+    await renderDriverList();
+    await renderRecent();
+  })();
   </script>
 </body>
 </html>
